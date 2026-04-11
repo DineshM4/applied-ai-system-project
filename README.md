@@ -29,6 +29,59 @@ Some prompts to answer:
 
 You can include a simple diagram or bullet list if helpful.
 
+The key to formulating a plan is to understand collaborative filtering and context-based filtering works. After researching, I understood that collaborative filtering goes off the user's preferences and instead of comparing the songs themselves, it compares with users who have similar interests and gives songs from there. On the other had contest-based filtering goes off the techinical aspects of the song they listen to and filters based on that. 
+
+So for my logic on scoring and ranking, I have split them.
+
+Scoring Rules: (Each Rule will be scored from 0.0 to 1.0 then multiplied by weigth)
+- Genre Match: The closer a song is to the user's gavorite genres, give more points up to 0.30
+  - If song is in user's fav genres, get full pts
+  - If song shares a family with user's fav genres, get half pts
+  - Otherwise 0 pts
+- Mood Match: A song is the right mood the user's wants, so can only be ranked 0.0 or 1.0 by weigth, give points up to 0.25
+- Energy Proximity: The closer the song's energy is to the user's target energy, the higher the score till 0.25
+- Acoustic Preference: If user likes higher acoustic music, find higher points for higher acousticness, if they like more electronic, find higher points for lower acousticness, up to 0.10
+- Valence Proximity: We take the user's mood from the table(happy,relaxed,chill,etc) and then score based on how closely the audio property matches the users mood, up to 0.10
+
+Ranking Rules:
+- Sort descending by score
+- Return Top k results
+- Tie-Breaking by Catalog Order: When there is an exact score, go by catalog order, therefore we need to implement a stable sort
+
+The logic is that once we get a song scored and ready to be sent for ranking, we reccomend based on the highest score, which would most likely mesh with user's interests/mood to listen to right now.
+
+For Song object, we will be using title, artist, genre, mood, energy, acousticness, and valence. For User profile object, we will be using favorite_genre, favorite_mood, target_energy, and target_acousticness.
+
+I changed likes_acoustic to target acousticness to match my logic for accoustic scoring in float based over boolean based. Favorite_genre is also a list now so that user can define multiple genres. I also have a genre family, to adjust toward rule S1 to be not binary but rather float based.
+
+NOTE: System might overprioritize genre and mood over the others
+
+flowchart TD
+    A([Start]) --> B[User provides UserProfile\nfavorite_genre list\nfavorite_mood\ntarget_energy\ntarget_acousticness]
+    B --> C[Load song catalog\nfrom songs.csv\n20 Songs with genre mood\nenergy acousticness valence]
+
+    C --> D{For each Song\nin catalog}
+
+    D --> E[S1 · Genre Match\nweight 0.30\nFav genre → 1.0\nSame family → 0.5\nNo match → 0.0]
+    D --> F[S2 · Mood Match\nweight 0.25\nMood equals fav_mood\n→ 1.0 else 0.0]
+    D --> G[S3 · Energy Proximity\nweight 0.25\n1 minus abs difference\nof song vs target]
+    D --> H[S4 · Acoustic Preference\nweight 0.10\n1 minus abs difference\nof song vs target]
+    D --> I[S5 · Valence Proximity\nweight 0.10\nMap mood to valence range\nscore closeness]
+
+    E --> J[Weighted Sum\nfinal score 0.0 to 1.0]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
+
+    J --> K[Attach score to Song]
+    K --> D
+
+    D -->|All songs scored| L[Sort descending by score\nStable sort — catalog order\nas tie-breaker]
+
+    L --> M[Slice top k results]
+    M --> N([Return Top-K Recommended Songs])
+
 ---
 
 ## Getting Started
@@ -209,3 +262,7 @@ A few sentences about what you learned:
 - How did building this change how you think about real music recommenders
 - Where do you think human judgment still matters, even if the model seems "smart"
 
+
+
+
+![alt text](image.png)
