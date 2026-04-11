@@ -114,15 +114,15 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
     list of human-readable strings explaining each component.
 
     Weights:
-      S1 Genre Match        0.30
-      S2 Mood Match         0.25
-      S3 Energy Proximity   0.25
-      S4 Acoustic Pref      0.10
+      S1 Genre Match        0.25
+      S2 Mood Match         0.20
+      S3 Energy Proximity   0.30
+      S4 Acoustic Pref      0.15
       S5 Valence Proximity  0.10
     """
     reasons: List[str] = []
 
-    # ── S1: Genre Match (weight 0.30) ────────────────────────────────────────
+    # ── S1: Genre Match (weight 0.25) ────────────────────────────────────────
     fav_genres = {g.lower() for g in user_prefs.get("favorite_genre", [])}
     song_genre = song.get("genre", "").lower()
 
@@ -138,16 +138,16 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
             fam for fam, members in GENRE_FAMILIES.items() if members & fav_genres
         }
         if song_family and song_family in user_families:
-            genre_score = 0.5
+            genre_score = 0.25
             reasons.append(
-                f"genre '{song_genre}' shares family '{song_family}' with favorites (half points)"
+                f"genre '{song_genre}' shares family '{song_family}' with favorites (quarter points)"
             )
         else:
             genre_score = 0.0
             reasons.append(
                 f"genre '{song_genre}' does not match favorites (no points)")
 
-    # ── S2: Mood Match (weight 0.25) ─────────────────────────────────────────
+    # ── S2: Mood Match (weight 0.20) ─────────────────────────────────────────
     fav_mood = user_prefs.get("favorite_mood", "").lower()
     song_mood = song.get("mood", "").lower()
     if song_mood == fav_mood:
@@ -158,7 +158,7 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
         reasons.append(
             f"mood '{song_mood}' does not match preferred mood '{fav_mood}'")
 
-    # ── S3: Energy Proximity (weight 0.25) ────────────────────────────────────
+    # ── S3: Energy Proximity (weight 0.30) ────────────────────────────────────
     target_energy = float(user_prefs.get("target_energy", 0.5))
     energy_score = 1.0 - abs(float(song.get("energy", 0.5)) - target_energy)
     reasons.append(
@@ -166,7 +166,7 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
         f"(song {song.get('energy'):.2f} vs target {target_energy:.2f})"
     )
 
-    # ── S4: Acoustic Preference (weight 0.10) ─────────────────────────────────
+    # ── S4: Acoustic Preference (weight 0.15) ─────────────────────────────────
     target_acousticness = float(user_prefs.get("target_acousticness", 0.5))
     acoustic_score = 1.0 - \
         abs(float(song.get("acousticness", 0.5)) - target_acousticness)
@@ -185,10 +185,10 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
 
     # ── Weighted sum ──────────────────────────────────────────────────────────
     total = (
-        genre_score * 0.30
-        + mood_score * 0.25
-        + energy_score * 0.25
-        + acoustic_score * 0.10
+        genre_score * 0.25
+        + mood_score * 0.20
+        + energy_score * 0.30
+        + acoustic_score * 0.15
         + valence_score * 0.10
     )
 

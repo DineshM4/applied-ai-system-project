@@ -13,6 +13,7 @@ Your goal is to:
 
 Replace this paragraph with your own summary of what your version does.
 
+The user gives a csv file of songs with set field requirements. I take that into my system and have a scoring logic built with genre, mood, energy, valence, and accousticness with respective weigths and send these results to the ranking logic. The ranking logic sorts the results based on score and sends the top k results. If a tie between score happens, we go catalouge based for ranking based on stable sorting.
 ---
 
 ## How The System Works
@@ -127,6 +128,7 @@ Use this section to document the experiments you ran. For example:
 - What happened when you added tempo or valence to the score
 - How did your system behave for different types of users
 
+I realized when I doubled energy and halved weigth for genre, the scoring became very flawed as the results could contain genres that were the opposite of what I wanted. When I added valence to the score, since my system has the valence hard-coded and valence itself did not have much weigth to it, the system choices actually improved a little because valence was picking up the slack of the "binary-coded" mood field. Users that had moods more present in csv file had a clearer reccomender system that users that didnt
 ---
 
 ## Limitations and Risks
@@ -141,6 +143,7 @@ Examples:
 
 You will go deeper on this in your model card.
 
+Catalog size defintely made reccomending songs harder. But having one of my scoring set on binary only 0.0 or 1.0 made the job even harder, how those that matched the mood significantly gains more than those dont, even if the user wanted "chill", "relaxed" is close but the reccomender would not notice that.
 ---
 
 ## Reflection
@@ -157,7 +160,9 @@ Write 1 to 2 paragraphs here about what you learned:
 
 ---
 
-## 7. `model_card_template.md`
+## 7. `model_card_template.md` 
+
+ALL REFLECTION COMPLETED IN model_card.md
 
 Combines reflection and model card framing from the Module 3 guidance. :contentReference[oaicite:2]{index=2}  
 
@@ -168,7 +173,7 @@ Combines reflection and model card framing from the Module 3 guidance. :contentR
 
 Give your recommender a name, for example:
 
-> VibeFinder 1.0
+> 
 
 ---
 
@@ -179,7 +184,6 @@ Give your recommender a name, for example:
 
 Example:
 
-> This model suggests 3 to 5 songs from a small catalog based on a user's preferred genre, mood, and energy level. It is for classroom exploration only, not for real users.
 
 ---
 
@@ -266,3 +270,49 @@ A few sentences about what you learned:
 
 
 ![alt text](image.png)
+![alt text](image-1.png)
+![alt text](image-2.png)
+
+---
+
+## Contradictory Profile Comparisons
+
+These comments explain what happens when you run pairs of profiles from `CONTRADICTORY_USER_PROFILES` and compare their outputs side by side.
+
+---
+
+### Pair 1: Genre Vacuum vs Family Maximizer
+
+**Genre Vacuum** lists zero favorite genres. Because no genre can ever match an empty list, every single song in the catalog scores zero on the genre signal — that whole 25% weight goes unused. The recommender has no choice but to rank songs purely on mood (chill), energy (0.4), and acousticness (0.7). Soft, slow, acoustic songs like *Library Rain* and *Midnight Coding* float to the top not because they fit a genre the user likes, but simply because they feel calm and quiet. Genre becomes a dead dial — turned all the way off.
+
+**Family Maximizer** goes to the opposite extreme: four genres (lofi, rock, jazz, hip-hop) that happen to touch almost every genre family in the catalog. Nearly every song earns at least quarter-points for genre because the user's taste covers so much ground. The genre signal is now so widely shared that it barely separates songs from each other — it becomes noise rather than signal. Paradoxically, the output ends up being driven by the same mood and energy proximity as Genre Vacuum, just for the opposite reason: not because genre scoring is blocked, but because it is nearly maxed out everywhere.
+
+> **Why this matters:** If a user tells the system nothing (or everything) about their genre taste, genre stops mattering. The recommendations look similar from both extremes, which reveals that genre is most useful when it is specific and narrow.
+
+---
+
+### Pair 2: Ghost Mood vs Contradictory Listener
+
+**Ghost Mood** asks for a "triumphant" mood — a mood that simply does not exist in the song catalog. Since no song can match a label that was never used, the mood signal scores zero for every track. The system falls back on genre (pop) and energy (0.8). High-energy pop songs like *Sunrise City* and *Gym Hero* rise to the top even though the user presumably wanted something that felt triumphant and uplifting. The recommender cannot invent what is not there, so it ignores the broken signal entirely and optimizes around the remaining ones.
+
+**Contradictory Listener** wants classical music, an aggressive mood, and extreme high energy (0.95). The only classical song in the catalog, *Cathedral Echo*, is peaceful, nearly silent (energy 0.22), and highly acoustic (0.96) — the exact opposite of aggressive and high-energy. No single song can satisfy all three signals simultaneously. In practice the energy and mood weights (combined 50%) overpower the genre weight (25%), so the system recommends metal and electronic songs like *Shatter Glass* that are aggressive and high-energy. The user asked for classical and got metal instead — because the numbers forced the trade-off.
+
+> **Why this matters:** When a user's preferences contradict each other, the system does not warn you or ask for clarification — it just picks the best available compromise. The winner is whatever signal has the most weight, not necessarily the signal the user cared about most.
+
+---
+
+### Pair 3: Mood Adjacent vs Valence Hijacker
+
+**Mood Adjacent** is a coherent, internally consistent profile: lofi genre, chill mood, low energy (0.4), high acousticness (0.8). Every preference points in the same direction. Songs like *Library Rain* satisfy all five scoring signals almost simultaneously — right genre, right mood, right energy, right acousticness, right emotional tone (valence). The top-5 results feel obviously correct: soft, slow, acoustic lofi tracks dominate because the profile gives the system a clear and unified target.
+
+**Valence Hijacker** mixes a high-energy rock preference with a "happy" mood. The problem is that rock songs in the catalog (*Storm Runner*) are tagged as "intense," not "happy." And the genuinely happy songs (*Sunrise City*, *Rooftop Lights*) are pop, not rock. Genre and mood pull in opposite directions. A song that earns full genre points misses on mood; a song that earns full mood points misses on genre. The system ends up recommending tracks that split the difference — decent energy proximity, partial genre credit — but nothing fully satisfies the user. This is a real pattern in music apps: people who like a genre for its sound but want a different emotional vibe than that genre typically delivers get messy results.
+
+> **Why this matters:** The cleaner and more consistent a user's preferences are, the better the recommendations. When genre and mood contradict each other, the system hedges — and the output can feel off to the user even though the math is working exactly as designed.
+
+---
+
+### Note: Perfect Ringer (tuned to Library Rain)
+
+This profile is reverse-engineered to match *Library Rain* almost exactly: lofi genre, chill mood, energy 0.35, acousticness 0.86. All five scoring signals align for that one song at the same time. *Library Rain* scores at or near the maximum because it earns full points on genre match, full points on mood match, near-perfect energy proximity, near-perfect acousticness proximity, and the valence of 0.60 lines up well with the chill mood target. It floats to #1 easily.
+
+This profile is a sanity check: it confirms the scoring system is working correctly. When a user's stated preferences genuinely and precisely describe a song in the catalog, that song should win — and it does. If it did not, something would be broken in the logic.
