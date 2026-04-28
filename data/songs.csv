@@ -19,3 +19,33 @@ id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness
 18,Tide & Salt,Coral Waves,reggae,laid-back,0.53,82,0.78,0.80,0.65
 19,Broken Compass,The Static Kind,emo,sad,0.62,112,0.20,0.58,0.31
 20,Desert Frequency,Sand Logic,world,spiritual,0.44,70,0.55,0.50,0.83
+21,Voltage Rush,Iron Slate,rock,energetic,0.88,148,0.55,0.71,0.12
+22,Rust & Bone,The Hollow Wolves,rock,melancholic,0.45,95,0.40,0.56,0.62
+23,Brass Honey,The Velvet Keys,jazz,euphoric,0.65,102,0.85,0.68,0.72
+24,Late Night Pages,Solo Candle,jazz,focused,0.34,85,0.62,0.50,0.88
+25,Drift & Dissolve,Pale Signal,ambient,peaceful,0.18,55,0.70,0.32,0.94
+26,Grey Orbit,Pale Signal,ambient,moody,0.32,68,0.44,0.38,0.85
+27,Chain Reaction,Brvnx,hip-hop,aggressive,0.92,142,0.35,0.88,0.06
+28,Sunday Smoke,Cali Brass,hip-hop,laid-back,0.58,88,0.74,0.78,0.28
+29,Slow Burn Letters,Amara Soul,r&b,romantic,0.52,92,0.88,0.65,0.50
+30,Faded Photographs,Indigo Shore,r&b,nostalgic,0.44,84,0.67,0.60,0.66
+31,Wildflower Run,Colt Waverly,folk,happy,0.38,96,0.78,0.58,0.88
+32,Stone River Hymn,The Hollow Road,folk,spiritual,0.25,62,0.58,0.42,0.93
+33,Bleed the Circuit,Iron Veil,metal,intense,0.95,170,0.30,0.58,0.05
+34,Zero Gravity Rage,Voidcrusher,metal,aggressive,0.98,190,0.18,0.52,0.03
+35,Silk & Silence,Mira Voss,classical,relaxed,0.20,58,0.75,0.30,0.97
+36,Nocturne in Static,Arwen Finch,classical,moody,0.30,72,0.45,0.35,0.91
+37,Grid Collapse,DRVFT,electronic,energetic,0.90,138,0.80,0.92,0.04
+38,Soft Voltage,Orbit Bloom,electronic,chill,0.55,115,0.68,0.70,0.15
+39,Neon Horizon,The Midnight,synthwave,euphoric,0.85,128,0.90,0.82,0.08
+40,Cassette Glow,Retro Wave,synthwave,nostalgic,0.68,105,0.62,0.74,0.20
+41,Golden Static,Indigo Parade,indie pop,happy,0.72,126,0.83,0.80,0.30
+42,Paper Hearts,Slow Stereo,indie pop,romantic,0.60,112,0.80,0.72,0.42
+43,Back Porch Evening,Colt Waverly,country,laid-back,0.38,98,0.72,0.65,0.80
+44,Dust Road Memory,Blue Ember,country,melancholic,0.36,88,0.40,0.50,0.82
+45,Harbor Gold,Coral Waves,reggae,happy,0.60,90,0.82,0.82,0.58
+46,Island Sunrise,Irie Bloom,reggae,peaceful,0.42,76,0.74,0.65,0.72
+47,Threadbare,The Static Kind,emo,melancholic,0.55,108,0.28,0.55,0.36
+48,Scream Architecture,Fallout Frame,emo,intense,0.78,130,0.35,0.65,0.18
+49,Dust & Ceremony,Sand Logic,world,spiritual,0.36,65,0.60,0.48,0.86
+50,River Crossing,Nomad Current,world,relaxed,0.40,75,0.68,0.55,0.78

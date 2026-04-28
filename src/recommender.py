@@ -1,8 +1,12 @@
 import os
+import csv
+import json
 import logging
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
+import chromadb
+from typing import List, Dict, Tuple
+from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -10,10 +14,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 @dataclass
 class Song:
-    """
-    Represents a song and its attributes.
-    Required by tests/test_recommender.py
-    """
     id: int
     title: str
     artist: str
@@ -28,10 +28,6 @@ class Song:
 
 @dataclass
 class UserProfile:
-    """
-    Represents a user's taste preferences.
-    Required by tests/test_recommender.py
-    """
     favorite_genre: list[str]
     favorite_mood: str
     target_energy: float
@@ -47,30 +43,26 @@ GENRE_FAMILIES = {
 
 
 class Recommender:
-    """
-    OOP implementation of the recommendation logic.
-    Required by tests/test_recommender.py
-    """
-
     def __init__(self, songs: List[Song]):
-        """Store the catalog of songs for use during recommendation."""
+        """Stores the song catalog used for scoring and recommendation."""
         self.songs = songs
 
     def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
-        """Return the first k songs from the catalog (recommendation logic not yet implemented)."""
-        # TODO: Implement recommendation logic
-        return self.songs[:k]
+        """Returns the top-k songs ranked by score against the given user profile."""
+        user_dict = asdict(user)
+        scored = [(song, score_song(user_dict, asdict(song))[0])
+                  for song in self.songs]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [song for song, _ in scored[:k]]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
-        """Return a placeholder explanation string (explanation logic not yet implemented)."""
-        # TODO: Implement explanation logic
-        return "Explanation placeholder"
+        """Returns a pipe-delimited string of scoring reasons for a song against the user profile."""
+        _, reasons = score_song(asdict(user), asdict(song))
+        return " | ".join(reasons)
 
 
 def load_songs(csv_path: str) -> List[Dict]:
-    """Parse a CSV file into a list of song dicts with correctly typed numeric fields."""
-    import csv
-
+    """Parses a CSV file into a list of song dicts, casting numeric fields to int or float."""
     int_fields = {"id"}
     float_fields = {"energy", "tempo_bpm",
                     "valence", "danceability", "acousticness"}
@@ -91,32 +83,103 @@ def load_songs(csv_path: str) -> List[Dict]:
     return songs
 
 
-def _float_label(val: float) -> str:
-    """Maps a 0.0–1.0 float to a plain-English intensity word."""
-    if val >= 0.75:
-        return "very high"
-    if val >= 0.50:
-        return "high"
-    if val >= 0.25:
-        return "moderate"
-    return "low"
+_MOOD_PHRASES = {
+    "euphoric":    "euphoric and exhilarating",
+    "happy":       "uplifting and joyful",
+    "energetic":   "driving and high-energy",
+    "aggressive":  "aggressive and hard-hitting",
+    "intense":     "intense and powerful",
+    "romantic":    "warm and romantic",
+    "laid-back":   "relaxed and effortless",
+    "chill":       "calm and easy-going",
+    "focused":     "focused and minimal",
+    "moody":       "dark and atmospheric",
+    "melancholic": "melancholic and reflective",
+    "nostalgic":   "nostalgic and bittersweet",
+    "peaceful":    "serene and tranquil",
+    "relaxed":     "smooth and unhurried",
+    "sad":         "sad and introspective",
+    "spiritual":   "contemplative and meditative",
+}
+
+
+def _tempo_phrase(bpm: float) -> str:
+    """Maps a BPM value to a human-readable tempo label."""
+    if bpm < 70:
+        return "very slow"
+    if bpm < 90:
+        return "slow"
+    if bpm < 110:
+        return "mid-tempo"
+    if bpm < 130:
+        return "upbeat"
+    if bpm < 150:
+        return "fast"
+    return "very fast"
+
+
+def _use_case(energy: float, acousticness: float, mood: str) -> str:
+    """Derives a suggested listening context from a track's energy, acousticness, and mood."""
+    if energy < 0.4 and acousticness > 0.6:
+        return "ideal for studying, reading, or winding down"
+    if energy < 0.4:
+        return "good for quiet background listening or relaxation"
+    if energy > 0.8 and acousticness < 0.3:
+        return "built for workouts, high-intensity activity, or releasing energy"
+    if energy > 0.7 and mood in ("euphoric", "happy", "energetic"):
+        return "perfect for dancing, parties, or getting motivated"
+    if mood in ("melancholic", "sad", "moody"):
+        return "suits late-night reflection or emotional listening"
+    if mood == "romantic":
+        return "fits intimate settings or slow evenings"
+    if mood in ("focused", "peaceful", "spiritual"):
+        return "suited to concentration, meditation, or background ambiance"
+    return "versatile for casual or mood-matching listening"
+
+
+def _instrumentation(acousticness: float) -> str:
+    """Maps an acousticness value to a description of the track's instrumentation mix."""
+    if acousticness >= 0.85:
+        return "almost entirely acoustic with natural, organic textures"
+    if acousticness >= 0.60:
+        return "predominantly acoustic with light electronic elements"
+    if acousticness >= 0.35:
+        return "a blend of acoustic and electronic instrumentation"
+    if acousticness >= 0.15:
+        return "primarily electronic with minimal acoustic presence"
+    return "fully electronic and synthetic with no acoustic instruments"
+
+
+def _valence_phrase(valence: float) -> str:
+    """Maps a valence value to a phrase describing the track's emotional tone."""
+    if valence >= 0.80:
+        return "strongly positive and feel-good"
+    if valence >= 0.60:
+        return "generally bright in tone"
+    if valence >= 0.45:
+        return "emotionally neutral or bittersweet"
+    if valence >= 0.25:
+        return "leaning dark or tense"
+    return "heavy and emotionally weighted"
 
 
 def song_to_document(song: Dict) -> str:
-    """Converts a song dict into a natural language string for ChromaDB embedding."""
+    """Converts a song dict into a natural language description used as the ChromaDB embedding document."""
+    mood = song["mood"]
+    energy = float(song["energy"])
+    acousticness = float(song["acousticness"])
     return (
-        f"{song['title']} by {song['artist']} is a {song['mood']} {song['genre']} track "
-        f"with {_float_label(song['energy'])} energy, "
-        f"{_float_label(song['acousticness'])} acousticness, "
-        f"{_float_label(song['valence'])} valence, "
-        f"and a tempo of {song['tempo_bpm']} BPM."
+        f"{song['title']} by {song['artist']} is a "
+        f"{_MOOD_PHRASES.get(mood, mood)} {song['genre']} track "
+        f"with a {_tempo_phrase(float(song['tempo_bpm']))} tempo of {song['tempo_bpm']} BPM. "
+        f"The sound is {_instrumentation(acousticness)}. "
+        f"It feels {_valence_phrase(float(song['valence']))} "
+        f"and is {_use_case(energy, acousticness, mood)}."
     )
 
 
 def build_chroma_collection(songs: List[Dict]):
-    """Loads all songs into an in-memory ChromaDB collection and returns it."""
-    import chromadb
-
+    """Creates an in-memory ChromaDB collection, adds all song documents, and returns it."""
     client = chromadb.Client()
     collection = client.get_or_create_collection("songs")
     collection.add(
@@ -128,11 +191,7 @@ def build_chroma_collection(songs: List[Dict]):
 
 
 def semantic_recommend(query: str, collection, k: int = 5) -> List[Tuple[Dict, float, str]]:
-    """Queries ChromaDB with a natural language string and returns top-k matches.
-
-    Returns list of (song_dict, distance, document_string).
-    Distance is 0–2 cosine distance — lower means closer match.
-    """
+    """Queries ChromaDB and returns top-k matches as (song_dict, cosine_distance, document) tuples."""
     results = collection.query(query_texts=[query], n_results=k)
     output = []
     for i in range(len(results["ids"][0])):
@@ -156,12 +215,7 @@ def semantic_recommend(query: str, collection, k: int = 5) -> List[Tuple[Dict, f
 
 
 def generate_explanation(query: str, rag_results: List[Tuple]) -> str:
-    """Calls Gemini to produce a DJ-style explanation for the retrieved songs.
-
-    Raises on any API error so the caller's guardrail can catch and fall back.
-    """
-    from google import genai
-
+    """Calls Gemini to produce a DJ-style playlist explanation for the retrieved songs. Raises on API error."""
     context = "\n".join(f"- {doc}" for _, _, doc in rag_results)
     prompt = (
         f"You are an expert DJ assistant. A user asked for: '{query}'.\n"
@@ -187,25 +241,65 @@ NEUTRAL_PROFILE = {
 }
 
 
+def extract_profile_from_query(query: str) -> Dict:
+    """Uses Gemini to parse a free-text query into a structured preference dict with favorite_genre, favorite_mood, target_energy, and target_acousticness. Raises on API or JSON parse error."""
+    prompt = (
+        f"Extract music preferences from this natural language query: '{query}'\n\n"
+        f"Return ONLY a valid JSON object with these exact keys:\n"
+        f'  "favorite_genre": array of 1-3 genre strings\n'
+        f'  "favorite_mood": single mood string\n'
+        f'  "target_energy": float 0.0-1.0\n'
+        f'  "target_acousticness": float 0.0-1.0\n\n'
+        f"Valid genres: lofi, pop, rock, ambient, jazz, synthwave, indie pop, "
+        f"hip-hop, r&b, folk, metal, country, classical, electronic, reggae, emo, world\n"
+        f"Valid moods: euphoric, happy, energetic, aggressive, intense, romantic, "
+        f"laid-back, chill, focused, moody, melancholic, nostalgic, peaceful, relaxed, sad, spiritual\n\n"
+        f"No markdown, no explanation. Return only the JSON object."
+    )
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt)
+    text = response.text.strip().removeprefix(
+        "```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(text)
+
+
+def rerank_candidates(candidates: List[Tuple], profile: Dict, k: int) -> List[Tuple]:
+    """Re-ranks candidates by averaging normalized semantic distance and score_song math score, returning top-k."""
+    results = []
+    for song_dict, distance, document in candidates:
+        semantic_score = max(0.0, 1.0 - distance / 2.0)
+        math_score, _ = score_song(profile, song_dict)
+        combined = 0.5 * semantic_score + 0.5 * math_score
+        results.append((song_dict, combined, document))
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:k]
+
+
 def rag_recommend(query: str, collection, songs: List[Dict], k: int = 5) -> Dict:
-    """Top-level RAG pipeline with guardrail fallback.
-
-    Tries: ChromaDB semantic retrieval → Gemini explanation.
-    Falls back to score_song math if the LLM call fails for any reason.
-
-    Always returns a dict with keys: source, songs, explanation.
-    """
+    """Runs the full RAG pipeline: ChromaDB retrieval, Gemini profile extraction, hybrid re-ranking, and explanation generation. Falls back to score_song math on error. Always returns a dict with keys: source, songs, explanation."""
     try:
-        rag_results = semantic_recommend(query, collection, k)
-        explanation = generate_explanation(query, rag_results)
+        n_candidates = min(k * 3, len(songs))
+        candidates = semantic_recommend(query, collection, n_candidates)
+
+        try:
+            soft_profile = extract_profile_from_query(query)
+        except Exception as e:
+            logging.warning(
+                f"[PROFILE EXTRACT] Failed ({type(e).__name__}). Using neutral profile for re-ranking.")
+            soft_profile = NEUTRAL_PROFILE
+
+        reranked = rerank_candidates(candidates, soft_profile, k)
+        explanation = generate_explanation(query, reranked)
         return {
             "source": "rag",
-            "songs": [s for s, _, _ in rag_results],
+            "songs": [s for s, _, _ in reranked],
             "explanation": explanation,
         }
     except Exception as e:
         logging.warning(
-            f"[FALLBACK] LLM failed ({type(e).__name__}: {e}). Falling back to score_song math.")
+            f"[FALLBACK] RAG pipeline failed ({type(e).__name__}: {e}). Falling back to score_song math.")
         fallback = recommend_songs(NEUTRAL_PROFILE, songs, k)
         explanation = "\n".join(
             f"{s['title']} by {s['artist']}: {exp}" for s, _, exp in fallback
@@ -238,20 +332,7 @@ MOOD_VALENCE_TARGET = {
 
 
 def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """
-    Scores a single song against user preferences.
-    Required by recommend_songs() and src/main.py
-
-    Returns (score, reasons) where score is 0.0–1.0 and reasons is a
-    list of human-readable strings explaining each component.
-
-    Weights:
-      S1 Genre Match        0.25
-      S2 Mood Match         0.20
-      S3 Energy Proximity   0.30
-      S4 Acoustic Pref      0.15
-      S5 Valence Proximity  0.10
-    """
+    """Scores a song against user preferences and returns (score, reasons). Score is 0.0–1.0 weighted across genre, mood, energy, acousticness, and valence."""
     reasons: List[str] = []
 
     # ── S1: Genre Match (weight 0.25) ────────────────────────────────────────
@@ -328,15 +409,7 @@ def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
 
 
 def recommend_songs(user_prefs: Dict, songs: List[Dict], k: int = 5) -> List[Tuple[Dict, float, str]]:
-    """
-    Functional implementation of the recommendation logic.
-    Required by src/main.py
-
-    Ranking rules (from README):
-      1. Sort descending by score
-      2. Tie-break by catalog order (stable sort preserves original index)
-      3. Return top-k results
-    """
+    """Scores every song against user preferences and returns the top-k as (song, score, explanation) tuples. Ties are broken by catalog order."""
     scored = []
     for song in songs:
         score, reasons = score_song(user_prefs, song)

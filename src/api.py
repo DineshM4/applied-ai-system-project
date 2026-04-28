@@ -1,3 +1,4 @@
+from recommender import load_songs, build_chroma_collection, rag_recommend
 import sys
 import os
 import logging
@@ -8,7 +9,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.dirname(__file__))
-from recommender import load_songs, build_chroma_collection, rag_recommend
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,6 +19,7 @@ _W = 52
 
 
 def _print_startup_banner(song_count: int) -> None:
+    """Prints a formatted startup banner showing song count and available endpoints."""
     bar = "═" * _W
     print(f"\n{bar}")
     print("  MUSIC RECOMMENDER API  —  Ready")
@@ -31,6 +32,7 @@ def _print_startup_banner(song_count: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Loads songs and builds the ChromaDB collection on startup; clears state on shutdown."""
     songs = load_songs("data/songs.csv")
     collection = build_chroma_collection(songs)
     app_state["songs"] = songs
@@ -45,7 +47,8 @@ app = FastAPI(title="Music Recommender API", lifespan=lifespan)
 
 
 class RecommendRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="Natural language music query")
+    query: str = Field(..., min_length=1,
+                       description="Natural language music query")
     k: int = Field(default=5, ge=1, le=20)
 
 
@@ -70,11 +73,13 @@ class RecommendResponse(BaseModel):
 
 @app.get("/")
 def health():
+    """Returns server status and the count of songs currently in memory."""
     return {"status": "ok", "songs_loaded": len(app_state.get("songs", []))}
 
 
 @app.post("/recommend", response_model=RecommendResponse)
 def recommend(req: RecommendRequest):
+    """Runs the RAG pipeline for the given query and returns top-k song recommendations."""
     if not app_state.get("collection"):
         raise HTTPException(status_code=503, detail="Catalog not loaded yet")
     result = rag_recommend(

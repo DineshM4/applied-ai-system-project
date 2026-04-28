@@ -2,33 +2,47 @@
 
 ## Project Summary
 
-In this project you will build and explain a small music recommender system.
-
-Your goal is to:
-
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-Replace this paragraph with your own summary of what your version does.
-
 The user gives a csv file of songs with set field requirements. I take that into my system and have a scoring logic built with genre, mood, energy, valence, and accousticness with respective weigths and send these results to the ranking logic. The ranking logic sorts the results based on score and sends the top k results. If a tie between score happens, we go catalouge based for ranking based on stable sorting.
 ---
 
 ## How The System Works
 
-Explain your design in plain language.
+## System Upgrade: From Math to Semantic RAG
 
-Some prompts to answer:
+The original recommender was a purely mathematical system. Every song was scored against
+a structured UserProfile using five weighted formulas: genre family match, mood equality,
+energy proximity, acousticness proximity, and valence proximity. The final score was a
+weighted sum of 0-to-1 sub-scores, and the top-k songs by score were returned. This is
+entirely deterministic — the same inputs always produce the same ranked list, with no
+understanding of language or meaning.
 
-- What features does each `Song` use in your system
-  - For example: genre, mood, energy, tempo
-- What information does your `UserProfile` store
-- How does your `Recommender` compute a score for each song
-- How do you choose which songs to recommend
+Hours 1–3 introduce a semantic upgrade built on Retrieval-Augmented Generation (RAG).
+Instead of structured UserProfile fields, the system now accepts a free-form natural
+language query ("I need something chill to study to"). ChromaDB embeds that query and
+all 20 songs into a shared vector space using the all-MiniLM-L6-v2 sentence-transformer
+model, then retrieves the closest songs by cosine distance. The retrieved songs are
+passed as context to Gemini, which generates a DJ-style explanation of why each track
+fits the request. If the LLM call fails for any reason, the system falls back to the
+original score_song math using a neutral mid-range profile, ensuring the API always
+returns a valid response.
 
-You can include a simple diagram or bullet list if helpful.
+## Architecture
+
+```mermaid
+flowchart LR
+    A([User Query\nnatural language]) --> B[POST /recommend\nFastAPI Endpoint]
+    B --> C[ChromaDB\nVector Search\nall-MiniLM-L6-v2]
+    C --> D[Top-K Songs\nsong dicts + distances]
+    D --> E[Gemini LLM\nContext Injection]
+    E --> F([Playlist + Explanation\nJSON response])
+
+    C -->|LLM failure\nguardrail| G[score_song Math\nFallback]
+    G --> F
+```
+
+Text description: User Query → FastAPI /recommend → ChromaDB vector search → Gemini LLM → JSON response
+
+---
 
 The key to formulating a plan is to understand collaborative filtering and context-based filtering works. After researching, I understood that collaborative filtering goes off the user's preferences and instead of comparing the songs themselves, it compares with users who have similar interests and gives songs from there. On the other had contest-based filtering goes off the techinical aspects of the song they listen to and filters based on that. 
 
@@ -57,16 +71,17 @@ I changed likes_acoustic to target acousticness to match my logic for accoustic 
 
 NOTE: System might overprioritize genre and mood over the others
 
+```mermaid
 flowchart TD
     A([Start]) --> B[User provides UserProfile\nfavorite_genre list\nfavorite_mood\ntarget_energy\ntarget_acousticness]
     B --> C[Load song catalog\nfrom songs.csv\n20 Songs with genre mood\nenergy acousticness valence]
 
     C --> D{For each Song\nin catalog}
 
-    D --> E[S1 · Genre Match\nweight 0.30\nFav genre → 1.0\nSame family → 0.5\nNo match → 0.0]
-    D --> F[S2 · Mood Match\nweight 0.25\nMood equals fav_mood\n→ 1.0 else 0.0]
-    D --> G[S3 · Energy Proximity\nweight 0.25\n1 minus abs difference\nof song vs target]
-    D --> H[S4 · Acoustic Preference\nweight 0.10\n1 minus abs difference\nof song vs target]
+    D --> E[S1 · Genre Match\nweight 0.25\nFav genre → 1.0\nSame family → 0.25\nNo match → 0.0]
+    D --> F[S2 · Mood Match\nweight 0.20\nMood equals fav_mood\n→ 1.0 else 0.0]
+    D --> G[S3 · Energy Proximity\nweight 0.30\n1 minus abs difference\nof song vs target]
+    D --> H[S4 · Acoustic Preference\nweight 0.15\n1 minus abs difference\nof song vs target]
     D --> I[S5 · Valence Proximity\nweight 0.10\nMap mood to valence range\nscore closeness]
 
     E --> J[Weighted Sum\nfinal score 0.0 to 1.0]
@@ -82,196 +97,143 @@ flowchart TD
 
     L --> M[Slice top k results]
     M --> N([Return Top-K Recommended Songs])
+```
 
 ---
 
 ## Getting Started
 
-### Setup
+### Prerequisites
+- Python 3.11+
+- A Gemini API key (free tier at https://aistudio.google.com/)
 
-1. Create a virtual environment (optional but recommended):
-
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
-
-2. Install dependencies
-
+### 1. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the app:
+### 2. Configure your API key
+Create a `.env` file in the project root:
+```
+GEMINI_API_KEY=your_key_here
+```
 
+### 3. Run the original CLI recommender (math-based)
 ```bash
 python -m src.main
 ```
 
-### Running Tests
+### 4. Run the RAG demo (semantic + LLM explanations)
+```bash
+python src/main.py
+```
+This calls `run_semantic_demo()` which executes 3 sample queries and prints results.
 
-Run the starter tests with:
+### 5. Start the FastAPI server
+Run from the **project root** (not from `src/`) so `data/songs.csv` resolves correctly:
+```bash
+uvicorn api:app --app-dir src --reload
+```
+Expected startup output:
+```
+INFO:     [STARTUP] Loaded 20 songs into ChromaDB.
+INFO:     Uvicorn running on http://127.0.0.1:8000
+```
+
+### 6. Test the API
+
+Health check:
+```bash
+curl http://localhost:8000/
+```
+Expected: `{"status":"ok","songs_loaded":20}`
+
+Sample recommendation request:
+```bash
+curl -s -X POST http://localhost:8000/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"query": "I need focus music for studying", "k": 5}' | python3 -m json.tool
+```
+
+Sample response (trimmed):
+```json
+{
+  "source": "rag",
+  "songs": [
+    {
+      "id": 3,
+      "title": "Library Rain",
+      "artist": "Cozy Vibes",
+      "genre": "lofi",
+      "mood": "chill",
+      "energy": 0.35,
+      "tempo_bpm": 72.0,
+      "valence": 0.6,
+      "danceability": 0.4,
+      "acousticness": 0.86
+    }
+  ],
+  "explanation": "Library Rain by Cozy Vibes is perfect for a study session..."
+}
+```
+
+Interactive API docs (Swagger UI): http://localhost:8000/docs
+
+### Running Tests
 
 ```bash
 pytest
 ```
 
-You can add more tests in `tests/test_recommender.py`.
-
 ---
 
 ## Experiments You Tried
 
-Use this section to document the experiments you ran. For example:
-
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
-
-I realized when I doubled energy and halved weigth for genre, the scoring became very flawed as the results could contain genres that were the opposite of what I wanted. When I added valence to the score, since my system has the valence hard-coded and valence itself did not have much weigth to it, the system choices actually improved a little because valence was picking up the slack of the "binary-coded" mood field. Users that had moods more present in csv file had a clearer reccomender system that users that didnt
+I realized when I doubled energy and halved weight for genre, the scoring became very flawed as the results could contain genres that were the opposite of what I wanted. When I added valence to the score, since my system has the valence hard-coded and valence itself did not have much weight to it, the system choices actually improved a little because valence was picking up the slack of the "binary-coded" mood field. Users that had moods more present in the csv file had a clearer recommender system than users that didn't.
 ---
 
 ## Limitations and Risks
 
-Summarize some limitations of your recommender.
-
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
-
-You will go deeper on this in your model card.
-
-Catalog size defintely made reccomending songs harder. But having one of my scoring set on binary only 0.0 or 1.0 made the job even harder, how those that matched the mood significantly gains more than those dont, even if the user wanted "chill", "relaxed" is close but the reccomender would not notice that.
+Catalog size definitely made recommending songs harder. But having one of my scoring signals set to binary-only 0.0 or 1.0 made the job even harder — songs that matched the mood gain significantly more than those that don't, even if the user wanted "chill" and "relaxed" is close. The recommender would not notice that similarity at all.
 ---
 
 ## Reflection
 
-Read and complete `model_card.md`:
-
 [**Model Card**](model_card.md)
 
-Write 1 to 2 paragraphs here about what you learned:
+Building this recommender showed how quickly structured scoring becomes a blunt instrument. The math pipeline converts rich musical preferences into five numbers and then adds them up — which works surprisingly well when a user's profile is coherent, but collapses when preferences contradict each other or when a requested mood simply doesn't exist in the catalog. The system can't ask a clarifying question; it just picks the best available compromise, which means the signal with the most weight always wins, regardless of what the user actually cared about most.
 
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
+The RAG upgrade revealed a different kind of bias: the embedding model treats the natural language description of a song as a proxy for the song itself. Songs described with more specific or vivid language get retrieved more reliably than songs with generic labels. That's a data quality problem masquerading as a retrieval problem — if a song is labeled "chill" but the catalog entry doesn't mention studying or background listening, it may be outranked by a song that happens to use those exact words.
 
+## AI-Assisted Development Reflection
 
----
+I used Claude (claude-sonnet-4-6) extensively throughout Hours 1–3 to accelerate
+implementation. Here is an honest account of where it helped and where it led me astray.
 
-## 7. `model_card_template.md` 
+**One prompt that worked extremely well:**
+When I asked Claude to design the fallback guardrail in `rag_recommend()`, I described
+the constraint: "the fallback must use the existing score_song math, but score_song
+needs a structured UserProfile dict — not a free-text query." Claude immediately
+identified that a `NEUTRAL_PROFILE` constant with mid-range float values was the right
+bridge, and generated the try/except wrapper with consistent return keys ("source",
+"songs", "explanation") so the FastAPI response schema would never change regardless of
+which path ran. That architectural insight would have taken me longer to see on my own.
 
-ALL REFLECTION COMPLETED IN model_card.md
+**One suggestion I had to fix manually:**
+Claude initially suggested using `google.generativeai` (the old `genai` SDK) with
+`genai.GenerativeModel("gemini-1.5-flash")` and `model.generate_content(prompt)`. This
+syntax is from an older version of the library. The current package (`google-genai`)
+uses a client-based API: `genai.Client(api_key=...)` and
+`client.models.generate_content(model=..., contents=...)`. I had to read the current
+SDK docs to spot the mismatch and update the call signature in `generate_explanation()`.
+The code Claude gave me would have thrown an AttributeError at runtime.
 
-Combines reflection and model card framing from the Module 3 guidance. :contentReference[oaicite:2]{index=2}  
-
-```markdown
-# 🎧 Model Card - Music Recommender Simulation
-
-## 1. Model Name
-
-Give your recommender a name, for example:
-
-> 
-
----
-
-## 2. Intended Use
-
-- What is this system trying to do
-- Who is it for
-
-Example:
-
-
----
-
-## 3. How It Works (Short Explanation)
-
-Describe your scoring logic in plain language.
-
-- What features of each song does it consider
-- What information about the user does it use
-- How does it turn those into a number
-
-Try to avoid code in this section, treat it like an explanation to a non programmer.
-
----
-
-## 4. Data
-
-Describe your dataset.
-
-- How many songs are in `data/songs.csv`
-- Did you add or remove any songs
-- What kinds of genres or moods are represented
-- Whose taste does this data mostly reflect
-
----
-
-## 5. Strengths
-
-Where does your recommender work well
-
-You can think about:
-- Situations where the top results "felt right"
-- Particular user profiles it served well
-- Simplicity or transparency benefits
-
----
-
-## 6. Limitations and Bias
-
-Where does your recommender struggle
-
-Some prompts:
-- Does it ignore some genres or moods
-- Does it treat all users as if they have the same taste shape
-- Is it biased toward high energy or one genre by default
-- How could this be unfair if used in a real product
-
----
-
-## 7. Evaluation
-
-How did you check your system
-
-Examples:
-- You tried multiple user profiles and wrote down whether the results matched your expectations
-- You compared your simulation to what a real app like Spotify or YouTube tends to recommend
-- You wrote tests for your scoring logic
-
-You do not need a numeric metric, but if you used one, explain what it measures.
-
----
-
-## 8. Future Work
-
-If you had more time, how would you improve this recommender
-
-Examples:
-
-- Add support for multiple users and "group vibe" recommendations
-- Balance diversity of songs instead of always picking the closest match
-- Use more features, like tempo ranges or lyric themes
-
----
-
-## 9. Personal Reflection
-
-A few sentences about what you learned:
-
-- What surprised you about how your system behaved
-- How did building this change how you think about real music recommenders
-- Where do you think human judgment still matters, even if the model seems "smart"
-
-
-
-
-![alt text](image.png)
-![alt text](image-1.png)
-![alt text](image-2.png)
+**What I learned:**
+AI coding assistants are strongest at high-level design (identifying the right
+abstraction, structuring a consistent return schema) and weakest when SDK APIs have
+changed since their training cutoff. Treat generated import paths and method signatures
+as "probably right" rather than "definitely right" — always verify against the current
+library docs before committing.
 
 ---
 
