@@ -1,0 +1,535 @@
+Hour 1: The Core RAG Engine (Substantial AI Feature - 3 pts)
+
+Goal: Replace the hardcoded score_song math with a semantic vector search.
+
+--- EXPANDED PLAN ---
+
+Step 0 — Verify Dependencies
+  - chromadb is already in requirements.txt. Confirm installed:
+      pip install -r requirements.txt
+      python -c "import chromadb; print('ok')"
+  - Use ChromaDB's default embedding (all-MiniLM-L6-v2 via sentence-transformers)
+    Zero config, local, no API key needed for Hour 1.
+
+Step 1 — Song String Template (recommender.py)
+  - Write: song_to_document(song: Dict) -> str
+  - Converts a song dict into a descriptive natural language sentence.
+  - Use plain English descriptors for numeric fields (e.g., 0.87 -> "very high energy")
+    so the embedding captures meaning, not raw floats.
+  - Write helper: energy_label(val: float) -> str
+    Maps float ranges to words: low / moderate / high / very high.
+    Reuse same logic for acousticness and valence fields.
+  - Target format:
+    "Neon Lights by The Midnight is a euphoric synthwave track with very high energy,
+     very low acousticness, high valence, and a tempo of 128 BPM."
+
+Step 2 — ChromaDB Collection Setup (recommender.py)
+  - Write: build_chroma_collection(songs: List[Dict]) -> chromadb.Collection
+  - Use in-memory client: chromadb.Client() — no disk I/O, fast, sufficient for demo.
+  - Create (or get-or-create) a collection named "songs".
+  - For each song add:
+      ids:       str(song["id"])
+      documents: song_to_document(song)
+      metadatas: {k: str(v) for k, v in song.items()}  # ChromaDB requires str/float, no nested objects
+  - Call once at startup, not on every query.
+
+Step 3 — Semantic Retrieval Function (recommender.py)
+  - Write: semantic_recommend(query: str, collection, k: int = 5) -> List[Tuple]
+  - results = collection.query(query_texts=[query], n_results=k)
+  - ChromaDB returns parallel lists: ids, documents, metadatas, distances
+  - Reconstruct each result as (song_dict, distance, document_string)
+  - Return in rank order (ChromaDB already ranks by distance).
+  - Keep raw distance (0–2 scale, lower = better). Do NOT transform to 0–1 score yet.
+
+Step 4 — New Entry Point in main.py
+  - Add: run_semantic_demo() alongside existing run_demo()
+  - Steps inside:
+      1. load_songs() as before
+      2. build_chroma_collection(songs) — called once
+      3. Run 3 sample natural language queries:
+           "I want something chill and acoustic to study to"
+           "Give me aggressive high-energy rock"
+           "Upbeat electronic music for a workout"
+      4. For each query: call semantic_recommend(), print title/artist/genre/mood/distance
+  - Keep run_demo() intact — old math path stays untouched (becomes fallback in Hour 2).
+
+Step 5 — Sanity Checks Before Moving On
+  - [ ] ChromaDB collection loads all 20 songs without error
+  - [ ] Query "chill lofi study music" returns Library Rain or similar in top 3
+  - [ ] Query "aggressive metal" returns Shatter Glass in top 3
+  - [ ] No crashes on edge-case queries (empty string, unknown genre)
+  - [ ] run_demo() (old math path) still runs cleanly
+
+Files Modified in Hour 1:
+  - src/recommender.py  — add energy_label, song_to_document, build_chroma_collection, semantic_recommend
+  - src/main.py         — add run_semantic_demo(), call from __main__ block
+  - requirements.txt    — verify chromadb present, add sentence-transformers if needed
+
+--- END EXPANDED PLAN ---
+
+Hour 2: AI Explanations & Guardrails (Reliability/Evaluation - 3 pts)
+
+Goal: Fulfill the requirement that the AI actively uses retrieved data, and implement a safety mechanism.
+
+--- EXPANDED PLAN ---
+
+LLM Choice: google-generativeai (Gemini) — already in requirements.txt, no extra install needed.
+API key loaded via python-dotenv from a .env file (python-dotenv already in requirements.txt).
+
+Step 1 — Environment Setup
+  - Create a .env file in the project root:
+        GEMINI_API_KEY=your_key_here
+  - Add .env to .gitignore immediately (never commit API keys).
+  - In recommender.py, load the key at the top:
+        from dotenv import load_dotenv
+        load_dotenv()
+        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+  - Verify: python3 -c "from dotenv import load_dotenv; load_dotenv(); import os; print(os.getenv('GEMINI_API_KEY')[:8])"
+
+Step 2 — LLM Explanation Function (recommender.py)
+  - Write: generate_explanation(query: str, rag_results: List[Tuple]) -> str
+  - Build a context block from the document strings in rag_results:
+        context = "\n".join(f"- {doc}" for _, _, doc in rag_results)
+  - Prompt template (DJ persona, retrieved context injected):
+        "You are an expert DJ assistant. A user asked for: '{query}'.
+         Based on a semantic search of our music catalog, these songs were retrieved:
+         {context}
+         Write a short, enthusiastic playlist recommendation (2-3 sentences max per song)
+         explaining why each song fits the user's request. Be specific — reference the
+         genre, mood, and energy of each track."
+  - Call Gemini:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        return response.text
+  - Keep this function focused: input = (query + rag results), output = string. No side effects.
+
+Step 3 — Fallback Logic Design (key architectural decision)
+  - The fallback must use score_song (math-based), but score_song needs a structured
+    UserProfile dict — not a natural language query.
+  - Solution: define a NEUTRAL_PROFILE default dict (mid-range values, no genre bias):
+        NEUTRAL_PROFILE = {
+            "name": "Fallback",
+            "favorite_genre": [],
+            "favorite_mood": "chill",
+            "target_energy": 0.5,
+            "target_acousticness": 0.5,
+        }
+  - On LLM failure: call recommend_songs(NEUTRAL_PROFILE, songs, k) and format the
+    score_song explanations as the returned "explanation" string.
+  - This satisfies the rubric: score_song is demonstrably used as the fallback path.
+
+Step 4 — Guardrail Wrapper Function (recommender.py)
+  - Write: rag_recommend(query, collection, songs, k=5) -> dict
+  - This is the single top-level function the API (Hour 3) will call.
+  - Structure:
+        try:
+            rag_results = semantic_recommend(query, collection, k)
+            explanation = generate_explanation(query, rag_results)
+            return {
+                "source": "rag",
+                "songs": [s for s, _, _ in rag_results],
+                "explanation": explanation,
+            }
+        except Exception as e:
+            logging.warning(f"[FALLBACK] LLM failed ({e}). Using score_song math.")
+            fallback = recommend_songs(NEUTRAL_PROFILE, songs, k)
+            explanation = "\n".join(
+                f"{s['title']}: {exp}" for s, _, exp in fallback
+            )
+            return {
+                "source": "fallback",
+                "songs": [s for s, _, _ in fallback],
+                "explanation": explanation,
+            }
+  - Return dict always has the same keys ("source", "songs", "explanation") regardless
+    of which path ran — this makes the FastAPI response schema consistent in Hour 3.
+  - Use Python's logging module (not print) for the fallback event:
+        import logging
+        logging.basicConfig(level=logging.WARNING)
+
+Step 5 — Wire up in main.py
+  - Update run_semantic_demo() to call rag_recommend() instead of semantic_recommend().
+  - Print: the query, the source ("rag" or "fallback"), song list, and explanation block.
+  - To manually test the fallback path: temporarily pass an invalid API key and confirm
+    the fallback triggers, logs the warning, and returns score_song results.
+
+Step 6 — Sanity Checks Before Moving On
+  - [ ] LLM explanation is generated and references song titles/genres from the results
+  - [ ] Explanation is 2-3 sentences per song (not a wall of text, not empty)
+  - [ ] Passing a bad API key triggers the except block and logs "[FALLBACK]"
+  - [ ] Fallback returns 5 songs with score_song explanations (not empty)
+  - [ ] Return dict always has keys: "source", "songs", "explanation"
+  - [ ] run_demo() (pure math path) still runs cleanly — nothing broken
+
+Files Modified in Hour 2:
+  - .env                — new file, GEMINI_API_KEY (gitignored)
+  - .gitignore          — add .env if not already present
+  - src/recommender.py  — add NEUTRAL_PROFILE, generate_explanation, rag_recommend;
+                          add imports: os, logging, dotenv, google.generativeai
+  - src/main.py         — update run_semantic_demo() to call rag_recommend()
+
+--- END EXPANDED PLAN ---
+
+Hour 3: The FastAPI Wrapper (End-to-End Demo - 3 pts)
+
+Goal: Prove the system works end-to-end dynamically by wrapping the RAG pipeline in a
+real HTTP API. The rubric requires a POST /recommend endpoint that accepts a text query
+and returns an AI-generated playlist with explanation, verified across 2-3 distinct inputs.
+
+--- EXPANDED PLAN ---
+
+Context: Hours 1 & 2 are complete.
+  - recommender.py exposes: load_songs, build_chroma_collection, rag_recommend
+  - rag_recommend(query, collection, songs, k) always returns:
+        {"source": "rag"|"fallback", "songs": [list of song dicts], "explanation": str}
+  - fastapi==0.136.1 and uvicorn==0.46.0 are already in requirements.txt
+  - main.py imports from recommender directly (no package __init__.py needed)
+  - data/songs.csv path is relative to project root — uvicorn must be launched from root
+
+Step 1 — Create src/api.py
+  File: src/api.py (new file)
+
+  1a. Imports and app instantiation:
+        import sys, os, logging
+        from contextlib import asynccontextmanager
+        from fastapi import FastAPI, HTTPException
+        from pydantic import BaseModel, Field
+        from typing import List, Optional
+
+        sys.path.insert(0, os.path.dirname(__file__))   # makes "import recommender" work
+        from recommender import load_songs, build_chroma_collection, rag_recommend
+
+  1b. Pydantic request model:
+        class RecommendRequest(BaseModel):
+            query: str = Field(..., min_length=1, description="Natural language music query")
+            k: int = Field(default=5, ge=1, le=20)
+
+  1c. Pydantic response models (match rag_recommend's return dict exactly):
+        class SongOut(BaseModel):
+            id: int
+            title: str
+            artist: str
+            genre: str
+            mood: str
+            energy: float
+            tempo_bpm: float
+            valence: float
+            danceability: float
+            acousticness: float
+
+        class RecommendResponse(BaseModel):
+            source: str          # "rag" or "fallback"
+            songs: List[SongOut]
+            explanation: str
+
+  1d. Lifespan context manager (load once at startup, not per request):
+        app_state = {}
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            songs = load_songs("data/songs.csv")
+            collection = build_chroma_collection(songs)
+            app_state["songs"] = songs
+            app_state["collection"] = collection
+            logging.info(f"[STARTUP] Loaded {len(songs)} songs into ChromaDB.")
+            yield
+            app_state.clear()
+
+        app = FastAPI(title="Music Recommender API", lifespan=lifespan)
+
+  1e. Health check endpoint (GET /):
+        @app.get("/")
+        def health():
+            return {"status": "ok", "songs_loaded": len(app_state.get("songs", []))}
+
+  1f. Main recommend endpoint (POST /recommend):
+        @app.post("/recommend", response_model=RecommendResponse)
+        def recommend(req: RecommendRequest):
+            if not app_state.get("collection"):
+                raise HTTPException(status_code=503, detail="Catalog not loaded yet")
+            result = rag_recommend(
+                req.query,
+                app_state["collection"],
+                app_state["songs"],
+                k=req.k,
+            )
+            return RecommendResponse(**result)
+
+Step 2 — Launch the server
+  Run from the PROJECT ROOT (not from src/) so that "data/songs.csv" resolves correctly:
+
+        uvicorn api:app --app-dir src --reload
+
+  The --app-dir src flag tells uvicorn to add src/ to sys.path before importing api.
+  --reload enables hot-reload during development (remove in production).
+
+  Expected startup log lines:
+    INFO:     Started server process
+    INFO:     [STARTUP] Loaded 20 songs into ChromaDB.
+    INFO:     Uvicorn running on http://127.0.0.1:8000
+
+Step 3 — Verify health check
+  curl http://localhost:8000/
+
+  Expected: {"status":"ok","songs_loaded":20}
+
+Step 4 — Run the 3 required test queries
+  Each curl below corresponds to a rubric-mandated distinct input:
+
+  Query A — chill/study:
+    curl -s -X POST http://localhost:8000/recommend \
+      -H "Content-Type: application/json" \
+      -d '{"query": "I need focus music for studying", "k": 5}' | python3 -m json.tool
+
+  Query B — aggressive/workout:
+    curl -s -X POST http://localhost:8000/recommend \
+      -H "Content-Type: application/json" \
+      -d '{"query": "Give me aggressive high-energy workout rock", "k": 5}' | python3 -m json.tool
+
+  Query C — upbeat/electronic:
+    curl -s -X POST http://localhost:8000/recommend \
+      -H "Content-Type: application/json" \
+      -d '{"query": "Upbeat electronic music for a party", "k": 5}' | python3 -m json.tool
+
+  For each query, confirm the JSON response has all three keys: source, songs, explanation.
+
+Step 5 — Interactive docs (bonus, zero extra work)
+  FastAPI auto-generates Swagger UI:
+    http://localhost:8000/docs
+  Use it to manually test the endpoint from a browser if needed.
+
+Step 6 — Sanity Checks Before Moving On
+  - [ ] Server starts without error; startup log shows "Loaded 20 songs"
+  - [ ] GET / returns {"status":"ok","songs_loaded":20}
+  - [ ] POST /recommend with Query A returns source="rag", 5 songs, non-empty explanation
+  - [ ] POST /recommend with Query B returns different songs than Query A
+  - [ ] POST /recommend with Query C returns source="rag", explanation references genre/mood
+  - [ ] POST /recommend with empty string body returns 422 Unprocessable Entity (Pydantic validation)
+  - [ ] run_semantic_demo() in main.py still runs cleanly (nothing broken in recommender.py)
+  - [ ] Fallback path: temporarily set GEMINI_API_KEY=bad in .env, restart server, confirm
+        POST /recommend returns source="fallback" and logs "[FALLBACK]" in terminal
+
+Files Created/Modified in Hour 3:
+  - src/api.py  — new file (FastAPI app with lifespan, request/response models, two endpoints)
+  - (no changes needed to recommender.py, main.py, or requirements.txt)
+
+--- END EXPANDED PLAN ---
+
+Hour 4: Artifacts & Documentation (12 pts)
+
+Goal: Secure the remaining documentation points. Do not write any more code during this hour.
+All edits are in README.md only. Work top-to-bottom through the file.
+
+--- EXPANDED PLAN ---
+
+Overview of what the README currently has (and what needs to change):
+  - "Project Summary" section: has template placeholder text alongside real content — clean it up
+  - "How The System Works" section: documents only the math pipeline — needs an upgrade paragraph
+  - Mermaid flowchart: exists but covers only the old scoring logic — needs a second diagram for RAG
+  - "Getting Started / Setup": only covers pip install and python -m src.main — needs FastAPI server launch + curl
+  - "Reflection" section: points to model_card.md — needs a new AI-assisted-development paragraph
+  - No architecture diagram for the new RAG pipeline exists anywhere yet
+
+--- RUBRIC POINT 1: Base Project Scope (3 pts) ---
+
+Where to edit: README.md → "How The System Works" section, at the very top.
+Add a new subsection titled "## System Upgrade: From Math to Semantic RAG" BEFORE the
+existing scoring-rules bullet list.
+
+What to write (write this verbatim or close to it — do not shorten):
+
+  > The original recommender was a purely mathematical system. Every song was scored against
+  > a structured UserProfile using five weighted formulas: genre family match, mood equality,
+  > energy proximity, acousticness proximity, and valence proximity. The final score was a
+  > weighted sum of 0-to-1 sub-scores, and the top-k songs by score were returned. This is
+  > entirely deterministic — the same inputs always produce the same ranked list, with no
+  > understanding of language or meaning.
+  >
+  > Hours 1–3 introduce a semantic upgrade built on Retrieval-Augmented Generation (RAG).
+  > Instead of structured UserProfile fields, the system now accepts a free-form natural
+  > language query ("I need something chill to study to"). ChromaDB embeds that query and
+  > all 20 songs into a shared vector space using the all-MiniLM-L6-v2 sentence-transformer
+  > model, then retrieves the closest songs by cosine distance. The retrieved songs are
+  > passed as context to Gemini, which generates a DJ-style explanation of why each track
+  > fits the request. If the LLM call fails for any reason, the system falls back to the
+  > original score_song math using a neutral mid-range profile, ensuring the API always
+  > returns a valid response.
+
+Why this wording works for the rubric:
+  - Explicitly names the original approach (math, weighted sum, deterministic)
+  - Names the upgrade (RAG, semantic, vector search, LLM explanation)
+  - References the fallback — shows awareness of the full pipeline
+
+--- RUBRIC POINT 2: Architecture Diagram (3 pts) ---
+
+Where to add: README.md → immediately after the "System Upgrade" paragraph above.
+Add a subsection titled "## Architecture" containing a Mermaid.js flowchart block.
+
+Write this Mermaid block exactly:
+
+  ```mermaid
+  flowchart LR
+      A([User Query\nnatural language]) --> B[POST /recommend\nFastAPI Endpoint]
+      B --> C[ChromaDB\nVector Search\nall-MiniLM-L6-v2]
+      C --> D[Top-K Songs\nsong dicts + distances]
+      D --> E[Gemini LLM\nContext Injection]
+      E --> F([Playlist + Explanation\nJSON response])
+
+      C -->|LLM failure\nguardrail| G[score_song Math\nFallback]
+      G --> F
+  ```
+
+Notes:
+  - The flowchart shows all five components the rubric requires:
+      User Input, FastAPI Endpoint, ChromaDB Retrieval, LLM Context Injection, Output
+  - The fallback branch is a bonus — it shows the guardrail design from Hour 2
+  - GitHub renders Mermaid blocks natively in markdown — no image upload needed
+  - If Mermaid does not render in your submission viewer, also add a text description:
+      "User Query → FastAPI /recommend → ChromaDB vector search → Gemini LLM → JSON response"
+
+--- RUBRIC POINT 3: README & Setup (3 pts) ---
+
+Where to edit: README.md → "Getting Started / Setup" section.
+Replace the existing content of this section entirely with:
+
+  ### Prerequisites
+  - Python 3.11+
+  - A Gemini API key (free tier at https://aistudio.google.com/)
+
+  ### 1. Install dependencies
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+  ### 2. Configure your API key
+  Create a `.env` file in the project root:
+  ```
+  GEMINI_API_KEY=your_key_here
+  ```
+
+  ### 3. Run the original CLI recommender (math-based)
+  ```bash
+  python -m src.main
+  ```
+
+  ### 4. Run the RAG demo (semantic + LLM explanations)
+  ```bash
+  python src/main.py
+  ```
+  This calls `run_semantic_demo()` which executes 3 sample queries and prints results.
+
+  ### 5. Start the FastAPI server
+  Run from the **project root** (not from `src/`) so `data/songs.csv` resolves correctly:
+  ```bash
+  uvicorn api:app --app-dir src --reload
+  ```
+  Expected startup output:
+  ```
+  INFO:     [STARTUP] Loaded 20 songs into ChromaDB.
+  INFO:     Uvicorn running on http://127.0.0.1:8000
+  ```
+
+  ### 6. Test the API
+
+  Health check:
+  ```bash
+  curl http://localhost:8000/
+  ```
+  Expected: `{"status":"ok","songs_loaded":20}`
+
+  Sample recommendation request:
+  ```bash
+  curl -s -X POST http://localhost:8000/recommend \
+    -H "Content-Type: application/json" \
+    -d '{"query": "I need focus music for studying", "k": 5}' | python3 -m json.tool
+  ```
+
+  Sample response (trimmed):
+  ```json
+  {
+    "source": "rag",
+    "songs": [
+      {
+        "id": 3,
+        "title": "Library Rain",
+        "artist": "Cozy Vibes",
+        "genre": "lofi",
+        "mood": "chill",
+        "energy": 0.35,
+        "tempo_bpm": 72.0,
+        "valence": 0.6,
+        "danceability": 0.4,
+        "acousticness": 0.86
+      }
+    ],
+    "explanation": "Library Rain by Cozy Vibes is perfect for a study session..."
+  }
+  ```
+
+  Interactive API docs (Swagger UI): http://localhost:8000/docs
+
+  ### Running Tests
+  ```bash
+  pytest
+  ```
+
+--- RUBRIC POINT 4: Reflection (3 pts) ---
+
+Where to add: README.md → replace or expand the existing "Reflection" section.
+The current section just redirects to model_card.md. Keep the model_card.md link,
+but add a NEW subsection titled "## AI-Assisted Development Reflection" BELOW it.
+
+What to write (personalise lightly — do not leave it generic):
+
+  ## AI-Assisted Development Reflection
+
+  I used Claude (claude-sonnet-4-6) extensively throughout Hours 1–3 to accelerate
+  implementation. Here is an honest account of where it helped and where it led me astray.
+
+  **One prompt that worked extremely well:**
+  When I asked Claude to design the fallback guardrail in `rag_recommend()`, I described
+  the constraint: "the fallback must use the existing score_song math, but score_song
+  needs a structured UserProfile dict — not a free-text query." Claude immediately
+  identified that a `NEUTRAL_PROFILE` constant with mid-range float values was the right
+  bridge, and generated the try/except wrapper with consistent return keys ("source",
+  "songs", "explanation") so the FastAPI response schema would never change regardless of
+  which path ran. That architectural insight would have taken me longer to see on my own.
+
+  **One suggestion I had to fix manually:**
+  Claude initially suggested using `google.generativeai` (the old `genai` SDK) with
+  `genai.GenerativeModel("gemini-1.5-flash")` and `model.generate_content(prompt)`. This
+  syntax is from an older version of the library. The current package (`google-genai`)
+  uses a client-based API: `genai.Client(api_key=...)` and
+  `client.models.generate_content(model=..., contents=...)`. I had to read the current
+  SDK docs to spot the mismatch and update the call signature in `generate_explanation()`.
+  The code Claude gave me would have thrown an AttributeError at runtime.
+
+  **What I learned:**
+  AI coding assistants are strongest at high-level design (identifying the right
+  abstraction, structuring a consistent return schema) and weakest when SDK APIs have
+  changed since their training cutoff. Treat generated import paths and method signatures
+  as "probably right" rather than "definitely right" — always verify against the current
+  library docs before committing.
+
+--- SANITY CHECKS BEFORE SUBMITTING ---
+
+  - [ ] "System Upgrade" paragraph is present and mentions both the original math approach
+        and the new RAG + LLM pipeline by name
+  - [ ] Mermaid diagram renders in GitHub preview (push to remote and check)
+  - [ ] Diagram shows all 5 required components: User Input, FastAPI, ChromaDB, LLM, Output
+  - [ ] Setup section has copy-pasteable commands for: pip install, .env setup,
+        uvicorn server launch, curl health check, curl recommend query
+  - [ ] Sample curl response shown in README matches what the live server actually returns
+        (run the server and check before submitting)
+  - [ ] AI Reflection section names at least one good prompt and one bad/broken suggestion
+  - [ ] model_card.md link still works
+  - [ ] No template placeholder text remains ("Replace this paragraph", "Example:", etc.)
+  - [ ] The old math-pipeline Mermaid flowchart is still present (shows the base project)
+
+Files Modified in Hour 4:
+  - README.md  — add upgrade paragraph, RAG architecture diagram, full setup instructions,
+                 AI reflection section; remove remaining template placeholder text
+
+--- END EXPANDED PLAN ---

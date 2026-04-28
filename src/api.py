@@ -15,6 +15,20 @@ logging.basicConfig(level=logging.INFO)
 app_state: dict = {}
 
 
+_W = 52
+
+
+def _print_startup_banner(song_count: int) -> None:
+    bar = "═" * _W
+    print(f"\n{bar}")
+    print("  MUSIC RECOMMENDER API  —  Ready")
+    print(f"  {'─' * (_W - 4)}")
+    print(f"  Songs loaded : {song_count}")
+    print(f"  Endpoints    : GET /  |  POST /recommend")
+    print(f"  Docs         : http://127.0.0.1:8000/docs")
+    print(f"{bar}\n")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     songs = load_songs("data/songs.csv")
@@ -22,6 +36,7 @@ async def lifespan(app: FastAPI):
     app_state["songs"] = songs
     app_state["collection"] = collection
     logging.info(f"[STARTUP] Loaded {len(songs)} songs into ChromaDB.")
+    _print_startup_banner(len(songs))
     yield
     app_state.clear()
 
