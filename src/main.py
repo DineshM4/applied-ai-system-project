@@ -9,7 +9,7 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
-from recommender import load_songs, recommend_songs
+from recommender import load_songs, recommend_songs, build_chroma_collection, semantic_recommend
 
 DIVIDER = "─" * 52
 THIN_DIVIDER = "·" * 52
@@ -115,6 +115,35 @@ def print_recommendations(user_prefs: dict, recommendations: list) -> None:
     print(f"\n{DIVIDER}\n")
 
 
+SEMANTIC_QUERIES = [
+    "I want something chill and acoustic to study to",
+    "Give me aggressive high-energy rock",
+    "Upbeat electronic music for a workout",
+]
+
+
+def run_semantic_demo() -> None:
+    songs = load_songs("data/songs.csv")
+    collection = build_chroma_collection(songs)
+
+    print(f"\n{'═' * 52}")
+    print("  SEMANTIC RECOMMENDER DEMO")
+    print(f"{'═' * 52}")
+
+    for query in SEMANTIC_QUERIES:
+        results = semantic_recommend(query, collection, k=5)
+        print(f"\n  Query: \"{query}\"")
+        print(THIN_DIVIDER)
+        for rank, (song, distance, _) in enumerate(results, start=1):
+            print(
+                f"  #{rank}  {song['title']}  —  {song['artist']}"
+                f"  |  {song['genre']}  |  {song['mood']}  |  dist={distance:.4f}"
+            )
+        print()
+
+    print(f"{'═' * 52}\n")
+
+
 def main() -> None:
     songs = load_songs("data/songs.csv")
 
@@ -128,4 +157,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    run_semantic_demo()
     main()

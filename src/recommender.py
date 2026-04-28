@@ -85,6 +85,70 @@ def load_songs(csv_path: str) -> List[Dict]:
     return songs
 
 
+def _float_label(val: float) -> str:
+    """Maps a 0.0–1.0 float to a plain-English intensity word."""
+    if val >= 0.75:
+        return "very high"
+    if val >= 0.50:
+        return "high"
+    if val >= 0.25:
+        return "moderate"
+    return "low"
+
+
+def song_to_document(song: Dict) -> str:
+    """Converts a song dict into a natural language string for ChromaDB embedding."""
+    return (
+        f"{song['title']} by {song['artist']} is a {song['mood']} {song['genre']} track "
+        f"with {_float_label(song['energy'])} energy, "
+        f"{_float_label(song['acousticness'])} acousticness, "
+        f"{_float_label(song['valence'])} valence, "
+        f"and a tempo of {song['tempo_bpm']} BPM."
+    )
+
+
+def build_chroma_collection(songs: List[Dict]):
+    """Loads all songs into an in-memory ChromaDB collection and returns it."""
+    import chromadb
+
+    client = chromadb.Client()
+    collection = client.get_or_create_collection("songs")
+    collection.add(
+        ids=[str(s["id"]) for s in songs],
+        documents=[song_to_document(s) for s in songs],
+        metadatas=[{k: str(v) for k, v in s.items()} for s in songs],
+    )
+    return collection
+
+
+def semantic_recommend(query: str, collection, k: int = 5) -> List[Tuple[Dict, float, str]]:
+    """Queries ChromaDB with a natural language string and returns top-k matches.
+
+    Returns list of (song_dict, distance, document_string).
+    Distance is 0–2 cosine distance — lower means closer match.
+    """
+    results = collection.query(query_texts=[query], n_results=k)
+    output = []
+    for i in range(len(results["ids"][0])):
+        metadata = results["metadatas"][0][i]
+        song_dict = {
+            "id":           int(metadata["id"]),
+            "title":        metadata["title"],
+            "artist":       metadata["artist"],
+            "genre":        metadata["genre"],
+            "mood":         metadata["mood"],
+            "energy":       float(metadata["energy"]),
+            "tempo_bpm":    float(metadata["tempo_bpm"]),
+            "valence":      float(metadata["valence"]),
+            "danceability": float(metadata["danceability"]),
+            "acousticness": float(metadata["acousticness"]),
+        }
+        distance = results["distances"][0][i]
+        document = results["documents"][0][i]
+        output.append((song_dict, distance, document))
+    return output
+
+
 MOOD_VALENCE_TARGET = {
     "euphoric":    0.90,
     "happy":       0.85,
