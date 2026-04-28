@@ -1,5 +1,11 @@
+import os
+import logging
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 @dataclass
@@ -147,6 +153,68 @@ def semantic_recommend(query: str, collection, k: int = 5) -> List[Tuple[Dict, f
         document = results["documents"][0][i]
         output.append((song_dict, distance, document))
     return output
+
+
+def generate_explanation(query: str, rag_results: List[Tuple]) -> str:
+    """Calls Gemini to produce a DJ-style explanation for the retrieved songs.
+
+    Raises on any API error so the caller's guardrail can catch and fall back.
+    """
+    from google import genai
+
+    context = "\n".join(f"- {doc}" for _, _, doc in rag_results)
+    prompt = (
+        f"You are an expert DJ assistant. A user asked for: '{query}'.\n"
+        f"Based on a semantic search of our music catalog, these songs were retrieved:\n"
+        f"{context}\n\n"
+        f"Write a short, enthusiastic playlist recommendation. "
+        f"For each song write 1-2 sentences explaining why it fits the user's request. "
+        f"Reference the genre, mood, and energy of each track specifically."
+    )
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite", contents=prompt)
+    return response.text
+
+
+NEUTRAL_PROFILE = {
+    "name": "Fallback",
+    "favorite_genre": [],
+    "favorite_mood": "chill",
+    "target_energy": 0.5,
+    "target_acousticness": 0.5,
+}
+
+
+def rag_recommend(query: str, collection, songs: List[Dict], k: int = 5) -> Dict:
+    """Top-level RAG pipeline with guardrail fallback.
+
+    Tries: ChromaDB semantic retrieval → Gemini explanation.
+    Falls back to score_song math if the LLM call fails for any reason.
+
+    Always returns a dict with keys: source, songs, explanation.
+    """
+    try:
+        rag_results = semantic_recommend(query, collection, k)
+        explanation = generate_explanation(query, rag_results)
+        return {
+            "source": "rag",
+            "songs": [s for s, _, _ in rag_results],
+            "explanation": explanation,
+        }
+    except Exception as e:
+        logging.warning(
+            f"[FALLBACK] LLM failed ({type(e).__name__}: {e}). Falling back to score_song math.")
+        fallback = recommend_songs(NEUTRAL_PROFILE, songs, k)
+        explanation = "\n".join(
+            f"{s['title']} by {s['artist']}: {exp}" for s, _, exp in fallback
+        )
+        return {
+            "source": "fallback",
+            "songs": [s for s, _, _ in fallback],
+            "explanation": explanation,
+        }
 
 
 MOOD_VALENCE_TARGET = {

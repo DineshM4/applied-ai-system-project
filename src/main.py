@@ -9,7 +9,7 @@ You will implement the functions in recommender.py:
 - recommend_songs
 """
 
-from recommender import load_songs, recommend_songs, build_chroma_collection, semantic_recommend
+from recommender import load_songs, recommend_songs, build_chroma_collection, rag_recommend
 
 DIVIDER = "─" * 52
 THIN_DIVIDER = "·" * 52
@@ -127,18 +127,17 @@ def run_semantic_demo() -> None:
     collection = build_chroma_collection(songs)
 
     print(f"\n{'═' * 52}")
-    print("  SEMANTIC RECOMMENDER DEMO")
+    print("  RAG RECOMMENDER DEMO")
     print(f"{'═' * 52}")
 
     for query in SEMANTIC_QUERIES:
-        results = semantic_recommend(query, collection, k=5)
-        print(f"\n  Query: \"{query}\"")
+        result = rag_recommend(query, collection, songs, k=5)
+        print(f"\n  Query : \"{query}\"")
+        print(f"  Source: {result['source'].upper()}")
         print(THIN_DIVIDER)
-        for rank, (song, distance, _) in enumerate(results, start=1):
-            print(
-                f"  #{rank}  {song['title']}  —  {song['artist']}"
-                f"  |  {song['genre']}  |  {song['mood']}  |  dist={distance:.4f}"
-            )
+        for rank, song in enumerate(result["songs"], start=1):
+            print(f"  #{rank}  {song['title']}  —  {song['artist']}  |  {song['genre']}  |  {song['mood']}")
+        print(f"\n  Explanation:\n{result['explanation']}")
         print()
 
     print(f"{'═' * 52}\n")
