@@ -210,8 +210,6 @@ There are two main limitations to this project: catalog size and LLM capacity. A
 
 ## Reflection
 
-[**Model Card**](model_card.md)
-
 Building this recommender showed how quickly structured scoring becomes a blunt instrument. The math pipeline converts rich musical preferences into five numbers and then adds them up — which works surprisingly well when a user's profile is coherent, but collapses when preferences contradict each other or when a requested mood simply doesn't exist in the catalog. The system can't ask a clarifying question; it just picks the best available compromise, which means the signal with the most weight always wins, regardless of what the user actually cared about most.
 
 The RAG upgrade revealed a different kind of bias: the embedding model treats the natural language description of a song as a proxy for the song itself. Songs described with more specific or vivid language get retrieved more reliably than songs with generic labels. That's a data quality problem masquerading as a retrieval problem — if a song is labeled "chill" but the catalog entry doesn't mention studying or background listening, it may be outranked by a song that happens to use those exact words.
@@ -261,3 +259,7 @@ the project and lets me the developer take the final lead. I also understand the
 increased productivity as a whole, knowing how to prompt the AI is key to success. I strive to be an AI
 engineer with utility of AI building on top of my own creativity and critical thinking skills. 
 
+
+
+**Video Demo:**
+https://www.loom.com/share/f77a98e1a02847c595c47ed1c9ac7e16

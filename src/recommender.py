@@ -228,7 +228,7 @@ def generate_explanation(query: str, rag_results: List[Tuple]) -> str:
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
-        model="gemini-2.5-flash", contents=prompt)
+        model="gemini-2.5-flash-lite", contents=prompt)
     return response.text
 
 
@@ -259,7 +259,7 @@ def extract_profile_from_query(query: str) -> Dict:
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
-        model="gemini-2.5-flash", contents=prompt)
+        model="gemini-2.5-flash-lite", contents=prompt)
     text = response.text.strip().removeprefix(
         "```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(text)
@@ -294,7 +294,14 @@ def rag_recommend(query: str, collection, songs: List[Dict], k: int = 5) -> Dict
             soft_profile = None
 
         reranked = rerank_candidates(candidates, soft_profile, k)
-        explanation = generate_explanation(query, reranked)
+        try:
+            explanation = generate_explanation(query, reranked)
+        except Exception as e:
+            logging.warning(
+                f"[EXPLAIN FALLBACK] Gemini explanation failed ({type(e).__name__}). Using document text.")
+            explanation = "\n".join(
+                f"{s['title']} by {s['artist']}: {doc}" for s, _, doc in reranked
+            )
         return {
             "source": "rag",
             "songs": [s for s, _, _ in reranked],
