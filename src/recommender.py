@@ -3,7 +3,7 @@ import csv
 import json
 import logging
 import chromadb
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 from google import genai
@@ -265,13 +265,16 @@ def extract_profile_from_query(query: str) -> Dict:
     return json.loads(text)
 
 
-def rerank_candidates(candidates: List[Tuple], profile: Dict, k: int) -> List[Tuple]:
-    """Re-ranks candidates by averaging normalized semantic distance and score_song math score, returning top-k."""
+def rerank_candidates(candidates: List[Tuple], profile: Optional[Dict], k: int) -> List[Tuple]:
+    """Re-ranks candidates by semantic score alone (profile=None) or 50/50 hybrid with score_song math, returning top-k."""
     results = []
     for song_dict, distance, document in candidates:
         semantic_score = max(0.0, 1.0 - distance / 2.0)
-        math_score, _ = score_song(profile, song_dict)
-        combined = 0.5 * semantic_score + 0.5 * math_score
+        if profile is not None:
+            math_score, _ = score_song(profile, song_dict)
+            combined = 0.5 * semantic_score + 0.5 * math_score
+        else:
+            combined = semantic_score
         results.append((song_dict, combined, document))
     results.sort(key=lambda x: x[1], reverse=True)
     return results[:k]
@@ -287,8 +290,8 @@ def rag_recommend(query: str, collection, songs: List[Dict], k: int = 5) -> Dict
             soft_profile = extract_profile_from_query(query)
         except Exception as e:
             logging.warning(
-                f"[PROFILE EXTRACT] Failed ({type(e).__name__}). Using neutral profile for re-ranking.")
-            soft_profile = NEUTRAL_PROFILE
+                f"[PROFILE EXTRACT] Failed ({type(e).__name__}). Ranking by semantic score only.")
+            soft_profile = None
 
         reranked = rerank_candidates(candidates, soft_profile, k)
         explanation = generate_explanation(query, reranked)
