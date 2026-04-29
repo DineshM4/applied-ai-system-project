@@ -206,7 +206,7 @@ PATH 3 — Outer Guard  (ChromaDB down → pure math fallback)
 ## Limitations and Risks
 
 There are two main limitations to this project: catalog size and LLM capacity. As any recommender system, the more songs in the catalogue the more accurate the system will be. This issue is especially highlighted in this project because my data is in the form of a csv file instead of api calls from a music API. This will be a future implementation to add. The second limitation is the harder limition. As this project is a LLM recommender at its core, AI API keys dominate the survivability of the project. Should the API key be exhausted, the project would not be nearly as efficient. As such, this project can run at its max potential around 20-30 times before performance drops.
----
+
 
 ## Reflection
 
@@ -260,4 +260,4 @@ exactly the process, and this routine has drastically improved my comprehension 
 the project and lets me the developer take the final lead. I also understand the power of AI and how it has 
 increased productivity as a whole, knowing how to prompt the AI is key to success. I strive to be an AI
 engineer with utility of AI building on top of my own creativity and critical thinking skills. 
----
+
